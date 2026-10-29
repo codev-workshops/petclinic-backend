@@ -94,4 +94,16 @@ class PetTypeFormatterTests {
 		return petTypes;
 	}
 
+	@Test
+	void printsPlaceholderForUnnamedType() {
+		assertThat(this.petTypeFormatter.print(new PetType(), Locale.ENGLISH)).isEqualTo("<null>");
+	}
+
+	@Test
+	void parseMatchesNameExactly() {
+		given(this.types.findPetTypes()).willReturn(makePetTypes());
+
+		Assertions.assertThrows(ParseException.class, () -> petTypeFormatter.parse("DOG", Locale.ENGLISH));
+	}
+
 }

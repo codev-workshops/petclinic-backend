@@ -16,6 +16,13 @@
 
 package org.springframework.samples.petclinic.owner;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
+import java.time.LocalDate;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -55,9 +62,11 @@ class VisitControllerTests {
 	@MockitoBean
 	private OwnerRepository owners;
 
+	private Owner owner;
+
 	@BeforeEach
 	void init() {
-		Owner owner = new Owner();
+		this.owner = new Owner();
 		Pet pet = new Pet();
 		owner.addPet(pet);
 		pet.setId(TEST_PET_ID);
@@ -89,6 +98,61 @@ class VisitControllerTests {
 			.andExpect(model().attributeHasErrors("visit"))
 			.andExpect(status().isOk())
 			.andExpect(view().name("pets/createOrUpdateVisitForm"));
+	}
+
+	@Test
+	void processNewVisitFormAddsVisitToPetAndSaves() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, TEST_PET_ID).param("id", "42")
+				.param("date", "2024-05-01")
+				.param("description", "Annual check-up"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "Your visit has been booked"));
+
+		verify(this.owners).save(this.owner);
+		assertThat(this.owner.getPet(TEST_PET_ID).getVisits()).singleElement().satisfies(visit -> {
+			assertThat(visit.getId()).as("id must not be bindable").isNull();
+			assertThat(visit.getDescription()).isEqualTo("Annual check-up");
+			assertThat(visit.getDate()).isEqualTo(LocalDate.of(2024, 5, 1));
+		});
+	}
+
+	@Test
+	void processNewVisitFormWithBlankDescriptionDoesNotSave() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, TEST_PET_ID).param("description",
+					" "))
+			.andExpect(status().isOk())
+			.andExpect(model().attributeHasFieldErrors("visit", "description"))
+			.andExpect(view().name("pets/createOrUpdateVisitForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void initNewVisitFormForPetOfAnotherOwnerThrows() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, 99)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.hasRootCauseMessage("Pet with id 99 not found for owner with id 1.");
+	}
+
+	@Test
+	void processNewVisitFormForPetOfAnotherOwnerDoesNotSave() {
+		assertThatThrownBy(() -> mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, 99).param("description", "x")))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class);
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void initNewVisitFormWithUnknownOwnerThrows() {
+		given(this.owners.findById(99)).willReturn(Optional.empty());
+
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/pets/{petId}/visits/new", 99, TEST_PET_ID)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageStartingWith("Owner not found with id: 99");
 	}
 
 }
