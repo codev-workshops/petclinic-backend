@@ -103,7 +103,7 @@ class VisitControllerTests {
 	@Test
 	void processNewVisitFormAddsVisitToPetAndSaves() throws Exception {
 		mockMvc
-			.perform(post("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, TEST_PET_ID)
+			.perform(post("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, TEST_PET_ID).param("id", "42")
 				.param("date", "2024-05-01")
 				.param("description", "Annual check-up"))
 			.andExpect(status().is3xxRedirection())
@@ -111,6 +111,7 @@ class VisitControllerTests {
 
 		verify(this.owners).save(this.owner);
 		assertThat(this.owner.getPet(TEST_PET_ID).getVisits()).singleElement().satisfies(visit -> {
+			assertThat(visit.getId()).as("id must not be bindable").isNull();
 			assertThat(visit.getDescription()).isEqualTo("Annual check-up");
 			assertThat(visit.getDate()).isEqualTo(LocalDate.of(2024, 5, 1));
 		});

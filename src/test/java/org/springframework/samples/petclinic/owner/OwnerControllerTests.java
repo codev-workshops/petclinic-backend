@@ -254,10 +254,11 @@ class OwnerControllerTests {
 	}
 
 	@Test
-	void processCreationFormSavesOwnerAndRedirectsToDetails() throws Exception {
+	void processCreationFormSavesOwnerIgnoringSubmittedId() throws Exception {
 		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
 		mockMvc
-			.perform(post("/owners/new").param("firstName", "Joe")
+			.perform(post("/owners/new").param("id", "42")
+				.param("firstName", "Joe")
 				.param("lastName", "Bloggs")
 				.param("address", "123 Caramel Street")
 				.param("city", "London")
@@ -266,6 +267,7 @@ class OwnerControllerTests {
 			.andExpect(flash().attribute("message", "New Owner Created"));
 
 		verify(this.owners).save(saved.capture());
+		assertThat(saved.getValue().getId()).as("id must not be bindable").isNull();
 		assertThat(saved.getValue().getLastName()).isEqualTo("Bloggs");
 		assertThat(saved.getValue().getTelephone()).isEqualTo("1316761638");
 	}

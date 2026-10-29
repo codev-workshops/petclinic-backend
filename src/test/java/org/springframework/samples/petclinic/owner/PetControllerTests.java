@@ -26,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledInNativeImage;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.ComponentScan;
@@ -276,7 +277,11 @@ class PetControllerTests {
 	}
 
 	@Test
-	void processUpdateFormUpdatesExistingPetAndSaves() throws Exception {
+	void processUpdateFormCopiesSubmittedDetailsOntoOwnersPetAndSaves() throws Exception {
+		// Without open-session-in-view, findOwner and findPet load separate instances
+		given(this.owners.findById(TEST_OWNER_ID)).willAnswer(invocation -> Optional.of(createOwnerWithPets()));
+		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID)
 				.param("id", String.valueOf(TEST_PET_ID))
@@ -286,12 +291,12 @@ class PetControllerTests {
 			.andExpect(status().is3xxRedirection())
 			.andExpect(flash().attribute("message", "Pet details has been edited"));
 
-		verify(this.owners).save(this.owner);
-		Pet updated = this.owner.getPet(TEST_PET_ID);
+		verify(this.owners).save(saved.capture());
+		Pet updated = saved.getValue().getPet(TEST_PET_ID);
 		assertThat(updated.getName()).isEqualTo("Betty");
 		assertThat(updated.getType().getName()).isEqualTo("hamster");
 		assertThat(updated.getBirthDate()).isEqualTo(LocalDate.of(2015, 2, 12));
-		assertThat(this.owner.getPets()).hasSize(2);
+		assertThat(saved.getValue().getPets()).hasSize(2);
 	}
 
 	@Test
