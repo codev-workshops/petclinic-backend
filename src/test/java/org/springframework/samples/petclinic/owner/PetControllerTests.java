@@ -16,6 +16,12 @@
 
 package org.springframework.samples.petclinic.owner;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -28,6 +34,7 @@ import org.springframework.test.context.aot.DisabledInAotMode;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import jakarta.servlet.ServletException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -64,6 +71,8 @@ class PetControllerTests {
 	@MockitoBean
 	private PetTypeRepository types;
 
+	private Owner owner;
+
 	@BeforeEach
 	void setup() {
 		PetType cat = new PetType();
@@ -71,16 +80,24 @@ class PetControllerTests {
 		cat.setName("hamster");
 		given(this.types.findPetTypes()).willReturn(List.of(cat));
 
-		Owner owner = new Owner();
+		this.owner = createOwnerWithPets();
+		given(this.owners.findById(TEST_OWNER_ID)).willReturn(Optional.of(owner));
+	}
+
+	private Owner createOwnerWithPets() {
+		PetType hamster = this.types.findPetTypes().get(0);
+		Owner newOwner = new Owner();
 		Pet pet = new Pet();
 		Pet dog = new Pet();
-		owner.addPet(pet);
-		owner.addPet(dog);
+		newOwner.addPet(pet);
+		newOwner.addPet(dog);
 		pet.setId(TEST_PET_ID);
 		dog.setId(TEST_PET_ID + 1);
 		pet.setName("petty");
+		pet.setType(hamster);
+		pet.setBirthDate(LocalDate.of(2010, 1, 1));
 		dog.setName("doggy");
-		given(this.owners.findById(TEST_OWNER_ID)).willReturn(Optional.of(owner));
+		return newOwner;
 	}
 
 	@Test
@@ -204,6 +221,149 @@ class PetControllerTests {
 				.andExpect(model().attributeHasFieldErrors("pet", "name"))
 				.andExpect(model().attributeHasFieldErrorCode("pet", "name", "required"))
 				.andExpect(view().name("pets/createOrUpdatePetForm"));
+		}
+
+	}
+
+	@Test
+	void processCreationFormAddsPetToOwnerAndSaves() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Betty")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "New Pet has been Added"));
+
+		verify(this.owners).save(this.owner);
+		Pet betty = this.owner.getPet("Betty");
+		assertThat(betty).isNotNull();
+		assertThat(betty.getType().getName()).isEqualTo("hamster");
+		assertThat(betty.getBirthDate()).isEqualTo(LocalDate.of(2015, 2, 12));
+	}
+
+	@Test
+	void processCreationFormRejectsDuplicateNameIgnoringCase() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "PETTY")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().isOk())
+			.andExpect(model().attributeHasFieldErrorCode("pet", "name", "duplicate"))
+			.andExpect(view().name("pets/createOrUpdatePetForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void processCreationFormAcceptsBirthDateOfToday() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Newborn")
+				.param("type", "hamster")
+				.param("birthDate", LocalDate.now().toString()))
+			.andExpect(status().is3xxRedirection());
+
+		verify(this.owners).save(this.owner);
+	}
+
+	@Test
+	void processCreationFormWithUnknownOwnerThrows() {
+		given(this.owners.findById(99)).willReturn(Optional.empty());
+
+		assertThatThrownBy(() -> mockMvc.perform(post("/owners/{ownerId}/pets/new", 99).param("name", "Betty")))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageStartingWith("Owner not found with id: 99");
+	}
+
+	@Test
+	void processUpdateFormUpdatesExistingPetAndSaves() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID)
+				.param("id", String.valueOf(TEST_PET_ID))
+				.param("name", "Betty")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "Pet details has been edited"));
+
+		verify(this.owners).save(this.owner);
+		Pet updated = this.owner.getPet(TEST_PET_ID);
+		assertThat(updated.getName()).isEqualTo("Betty");
+		assertThat(updated.getType().getName()).isEqualTo("hamster");
+		assertThat(updated.getBirthDate()).isEqualTo(LocalDate.of(2015, 2, 12));
+		assertThat(this.owner.getPets()).hasSize(2);
+	}
+
+	@Test
+	void processUpdateFormKeepingOwnNameIsNotADuplicate() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID)
+				.param("id", String.valueOf(TEST_PET_ID))
+				.param("name", "petty")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().is3xxRedirection());
+
+		verify(this.owners).save(this.owner);
+	}
+
+	@Test
+	void processUpdateFormForPetNotOwnedByOwnerFailsWithoutSaving() {
+		assertThatThrownBy(
+				() -> mockMvc.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, 99).param("id", "99")
+					.param("name", "Intruder")
+					.param("type", "hamster")
+					.param("birthDate", "2015-02-12")))
+			.isInstanceOf(ServletException.class);
+
+		verify(this.owners, never()).save(any(Owner.class));
+		assertThat(this.owner.getPets()).hasSize(2);
+	}
+
+	@Nested
+	class ProcessUpdateFormBusinessRules {
+
+		@Test
+		void rejectsRenamingToAnotherPetsName() throws Exception {
+			// Without open-session-in-view, findOwner and findPet load separate instances
+			given(owners.findById(TEST_OWNER_ID)).willAnswer(invocation -> Optional.of(createOwnerWithPets()));
+
+			mockMvc
+				.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID)
+					.param("id", String.valueOf(TEST_PET_ID))
+					.param("name", "doggy")
+					.param("type", "hamster")
+					.param("birthDate", "2015-02-12"))
+				.andExpect(status().isOk())
+				.andExpect(model().attributeHasFieldErrorCode("pet", "name", "duplicate"))
+				.andExpect(view().name("pets/createOrUpdatePetForm"));
+
+			verify(owners, never()).save(any(Owner.class));
+		}
+
+		@Test
+		void rejectsFutureBirthDate() throws Exception {
+			mockMvc
+				.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID)
+					.param("id", String.valueOf(TEST_PET_ID))
+					.param("name", "petty")
+					.param("type", "hamster")
+					.param("birthDate", LocalDate.now().plusDays(1).toString()))
+				.andExpect(status().isOk())
+				.andExpect(model().attributeHasFieldErrorCode("pet", "birthDate", "typeMismatch.birthDate"))
+				.andExpect(view().name("pets/createOrUpdatePetForm"));
+
+			verify(owners, never()).save(any(Owner.class));
+		}
+
+		@Test
+		void withUnknownOwnerThrows() {
+			given(owners.findById(99)).willReturn(Optional.empty());
+
+			assertThatThrownBy(() -> mockMvc.perform(post("/owners/{ownerId}/pets/{petId}/edit", 99, TEST_PET_ID)))
+				.hasRootCauseInstanceOf(IllegalArgumentException.class)
+				.rootCause()
+				.hasMessageStartingWith("Owner not found with id: 99");
 		}
 
 	}

@@ -16,6 +16,11 @@
 
 package org.springframework.samples.petclinic.owner;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledInNativeImage;
@@ -246,6 +251,111 @@ class OwnerControllerTests {
 			.andExpect(status().is3xxRedirection())
 			.andExpect(redirectedUrl("/owners/" + pathOwnerId + "/edit"))
 			.andExpect(flash().attributeExists("error"));
+	}
+
+	@Test
+	void processCreationFormSavesOwnerAndRedirectsToDetails() throws Exception {
+		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+		mockMvc
+			.perform(post("/owners/new").param("firstName", "Joe")
+				.param("lastName", "Bloggs")
+				.param("address", "123 Caramel Street")
+				.param("city", "London")
+				.param("telephone", "1316761638"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "New Owner Created"));
+
+		verify(this.owners).save(saved.capture());
+		assertThat(saved.getValue().getLastName()).isEqualTo("Bloggs");
+		assertThat(saved.getValue().getTelephone()).isEqualTo("1316761638");
+	}
+
+	@Test
+	void processCreationFormWithInvalidTelephoneDoesNotSave() throws Exception {
+		mockMvc
+			.perform(post("/owners/new").param("firstName", "Joe")
+				.param("lastName", "Bloggs")
+				.param("address", "123 Caramel Street")
+				.param("city", "London")
+				.param("telephone", "12345"))
+			.andExpect(status().isOk())
+			.andExpect(model().attributeHasFieldErrors("owner", "telephone"))
+			.andExpect(view().name("owners/createOrUpdateOwnerForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void processFindFormWithoutLastNameSearchesAllOwners() throws Exception {
+		Page<Owner> results = new PageImpl<>(List.of(george(), new Owner()));
+		when(this.owners.findByLastNameStartingWith(eq(""), any(Pageable.class))).thenReturn(results);
+
+		mockMvc.perform(get("/owners")).andExpect(status().isOk()).andExpect(view().name("owners/ownersList"));
+
+		verify(this.owners).findByLastNameStartingWith(eq(""), any(Pageable.class));
+	}
+
+	@Test
+	void processFindFormRequestsFiveOwnersPerPage() throws Exception {
+		ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+		Page<Owner> results = new PageImpl<>(List.of(george(), new Owner()), Pageable.ofSize(5).withPage(1), 7);
+		when(this.owners.findByLastNameStartingWith(anyString(), any(Pageable.class))).thenReturn(results);
+
+		mockMvc.perform(get("/owners").param("page", "2"))
+			.andExpect(status().isOk())
+			.andExpect(model().attribute("currentPage", 2))
+			.andExpect(model().attribute("totalPages", 2))
+			.andExpect(model().attribute("totalItems", 7L))
+			.andExpect(model().attribute("listOwners", hasSize(2)))
+			.andExpect(view().name("owners/ownersList"));
+
+		verify(this.owners).findByLastNameStartingWith(anyString(), pageable.capture());
+		assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+		assertThat(pageable.getValue().getPageSize()).isEqualTo(5);
+	}
+
+	@Test
+	void processFindFormRejectsPageZero() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners").param("page", "0")))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.hasRootCauseMessage("Page index must not be less than zero");
+	}
+
+	@Test
+	void processUpdateOwnerFormSavesOwnerWithPathId() throws Exception {
+		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+		mockMvc
+			.perform(post("/owners/{ownerId}/edit", TEST_OWNER_ID).param("firstName", "Joe")
+				.param("lastName", "Bloggs")
+				.param("address", "123 Caramel Street")
+				.param("city", "London")
+				.param("telephone", "1616291589"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "Owner Values Updated"));
+
+		verify(this.owners).save(saved.capture());
+		assertThat(saved.getValue().getId()).isEqualTo(TEST_OWNER_ID);
+		assertThat(saved.getValue().getLastName()).isEqualTo("Bloggs");
+	}
+
+	@Test
+	void showOwnerWithUnknownIdThrows() {
+		given(this.owners.findById(99)).willReturn(Optional.empty());
+
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}", 99)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageStartingWith("Owner not found with id: 99");
+	}
+
+	@Test
+	void initUpdateOwnerFormWithUnknownIdThrows() {
+		given(this.owners.findById(99)).willReturn(Optional.empty());
+
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/edit", 99)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageStartingWith("Owner not found with id: 99");
 	}
 
 }

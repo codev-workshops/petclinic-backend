@@ -26,6 +26,8 @@
 
     <checkstyle.version>12.1.2</checkstyle.version>
     <jacoco.version>0.8.14</jacoco.version>
+    <pitest.version>1.30.1</pitest.version>
+    <pitest-junit5.version>1.2.3</pitest-junit5.version>
     <libsass.version>0.3.4</libsass.version>
     <lifecycle-mapping>1.0.0</lifecycle-mapping>
     <maven-checkstyle.version>3.6.0</maven-checkstyle.version>
@@ -269,6 +271,37 @@
             <phase>prepare-package</phase>
           </execution>
         </executions>
+      </plugin>
+      <!-- Mutation testing: ./mvnw test-compile org.pitest:pitest-maven:mutationCoverage -->
+      <plugin>
+        <groupId>org.pitest</groupId>
+        <artifactId>pitest-maven</artifactId>
+        <version>${pitest.version}</version>
+        <dependencies>
+          <dependency>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-junit5-plugin</artifactId>
+            <version>${pitest-junit5.version}</version>
+          </dependency>
+        </dependencies>
+        <configuration>
+          <targetClasses>
+            <param>org.springframework.samples.petclinic.*</param>
+          </targetClasses>
+          <targetTests>
+            <param>org.springframework.samples.petclinic.*</param>
+          </targetTests>
+          <excludedTestClasses>
+            <param>org.springframework.samples.petclinic.MySqlIntegrationTests</param>
+            <param>org.springframework.samples.petclinic.PostgresIntegrationTests</param>
+          </excludedTestClasses>
+          <outputFormats>
+            <param>HTML</param>
+            <param>XML</param>
+          </outputFormats>
+          <timestampedReports>false</timestampedReports>
+          <threads>4</threads>
+        </configuration>
       </plugin>
 
       <!-- Spring Boot Actuator displays build-related information if a git.properties file is

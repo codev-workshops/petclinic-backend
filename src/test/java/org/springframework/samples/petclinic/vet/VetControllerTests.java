@@ -16,6 +16,10 @@
 
 package org.springframework.samples.petclinic.vet;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
+import org.mockito.ArgumentCaptor;
+import static org.hamcrest.Matchers.hasSize;
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,6 +99,32 @@ class VetControllerTests {
 			.andExpect(status().isOk());
 		actions.andExpect(content().contentType(MediaType.APPLICATION_JSON))
 			.andExpect(jsonPath("$.vetList[0].id").value(1));
+	}
+
+	@Test
+	void showVetListAddsPaginationModelAndRequestsFiveVetsPerPage() throws Exception {
+		ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+
+		mockMvc.perform(get("/vets.html").param("page", "2"))
+			.andExpect(status().isOk())
+			.andExpect(model().attribute("currentPage", 2))
+			.andExpect(model().attribute("totalPages", 1))
+			.andExpect(model().attribute("totalItems", 2L))
+			.andExpect(model().attribute("listVets", hasSize(2)))
+			.andExpect(view().name("vets/vetList"));
+
+		verify(this.vets).findAll(pageable.capture());
+		assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+		assertThat(pageable.getValue().getPageSize()).isEqualTo(5);
+	}
+
+	@Test
+	void showResourcesVetListIncludesSpecialties() throws Exception {
+		mockMvc.perform(get("/vets").accept(MediaType.APPLICATION_JSON))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.vetList", hasSize(2)))
+			.andExpect(jsonPath("$.vetList[0].nrOfSpecialties").value(0))
+			.andExpect(jsonPath("$.vetList[1].specialties[0].name").value("radiology"));
 	}
 
 }

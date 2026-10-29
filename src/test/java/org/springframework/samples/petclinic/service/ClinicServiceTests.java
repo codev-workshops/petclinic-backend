@@ -16,6 +16,15 @@
 
 package org.springframework.samples.petclinic.service;
 
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import java.util.Comparator;
+import java.util.List;
+import jakarta.validation.ConstraintViolationException;
+import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.domain.PageRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
@@ -81,6 +90,9 @@ class ClinicServiceTests {
 
 	@Autowired
 	protected VetRepository vets;
+
+	@Autowired
+	private TestEntityManager entityManager;
 
 	private final Pageable pageable = Pageable.unpaged();
 
@@ -246,6 +258,169 @@ class ClinicServiceTests {
 			.element(0)
 			.extracting(Visit::getDate)
 			.isNotNull();
+	}
+
+	@Test
+	void shouldFindOwnersByLastNameIgnoringCase() {
+		assertThat(this.owners.findByLastNameStartingWith("davis", pageable)).hasSize(2);
+		assertThat(this.owners.findByLastNameStartingWith("DAV", pageable)).hasSize(2);
+	}
+
+	@Test
+	void shouldFindAllOwnersForEmptyLastName() {
+		assertThat(this.owners.findByLastNameStartingWith("", pageable)).hasSize(10);
+	}
+
+	@Test
+	void shouldTreatLikeWildcardsInLastNameLiterally() {
+		assertThat(this.owners.findByLastNameStartingWith("%", pageable)).isEmpty();
+		assertThat(this.owners.findByLastNameStartingWith("_avis", pageable)).isEmpty();
+	}
+
+	@Test
+	void shouldNotTrimLastName() {
+		assertThat(this.owners.findByLastNameStartingWith(" Davis", pageable)).isEmpty();
+	}
+
+	@Test
+	void shouldPageOwners() {
+		Page<Owner> firstPage = this.owners.findByLastNameStartingWith("", PageRequest.of(0, 5));
+		Page<Owner> secondPage = this.owners.findByLastNameStartingWith("", PageRequest.of(1, 5));
+		Page<Owner> pastLastPage = this.owners.findByLastNameStartingWith("", PageRequest.of(2, 5));
+
+		assertThat(firstPage).hasSize(5);
+		assertThat(firstPage.getTotalElements()).isEqualTo(10);
+		assertThat(firstPage.getTotalPages()).isEqualTo(2);
+		assertThat(secondPage).hasSize(5).doesNotContainAnyElementsOf(firstPage.getContent());
+		assertThat(pastLastPage).isEmpty();
+	}
+
+	@Test
+	void shouldReturnEmptyForUnknownOwnerId() {
+		assertThat(this.owners.findById(9999)).isEmpty();
+	}
+
+	@Test
+	void shouldRejectNullOwnerId() {
+		assertThatExceptionOfType(InvalidDataAccessApiUsageException.class)
+			.isThrownBy(() -> this.owners.findById(null));
+	}
+
+	@Test
+	void shouldRejectNegativePageIndex() {
+		assertThatIllegalArgumentException().isThrownBy(() -> PageRequest.of(-1, 5));
+	}
+
+	@Test
+	void shouldFindPetTypesOrderedByName() {
+		assertThat(this.types.findPetTypes()).extracting(PetType::getName)
+			.containsExactly("bird", "cat", "dog", "hamster", "lizard", "snake");
+	}
+
+	@Test
+	void shouldReturnPetsOrderedByName() {
+		Owner owner = this.owners.findById(6).orElseThrow();
+
+		assertThat(owner.getPets()).extracting(Pet::getName).containsExactly("Max", "Samantha");
+	}
+
+	@Test
+	void shouldReturnVisitsOrderedByDate() {
+		Pet pet = this.owners.findById(6).orElseThrow().getPet(7);
+
+		assertThat(pet.getVisits()).hasSizeGreaterThan(1)
+			.extracting(Visit::getDate)
+			.isSortedAccordingTo(Comparator.naturalOrder());
+	}
+
+	@Test
+	void shouldPageVets() {
+		Page<Vet> page = this.vets.findAll(PageRequest.of(0, 5));
+
+		assertThat(page).hasSize(5);
+		assertThat(page.getTotalElements()).isEqualTo(6);
+		assertThat(page.getTotalPages()).isEqualTo(2);
+	}
+
+	@Test
+	void shouldIncludeVetsWithoutSpecialties() {
+		List<Vet> vetsWithoutSpecialties = this.vets.findAll()
+			.stream()
+			.filter(vet -> vet.getNrOfSpecialties() == 0)
+			.toList();
+
+		assertThat(vetsWithoutSpecialties).extracting(Vet::getLastName).containsExactlyInAnyOrder("Carter", "Jenkins");
+	}
+
+	@Test
+	@Transactional
+	void shouldRejectOwnerWithInvalidTelephone() {
+		Owner owner = newOwner();
+		owner.setTelephone("abc");
+
+		assertThatExceptionOfType(ConstraintViolationException.class).isThrownBy(() -> {
+			this.owners.save(owner);
+			this.entityManager.flush();
+		});
+	}
+
+	@Test
+	@Transactional
+	void shouldRejectOwnerWithoutLastName() {
+		Owner owner = newOwner();
+		owner.setLastName(null);
+
+		assertThatExceptionOfType(ConstraintViolationException.class).isThrownBy(() -> {
+			this.owners.save(owner);
+			this.entityManager.flush();
+		});
+	}
+
+	@Test
+	@Transactional
+	void shouldRejectVisitWithBlankDescription() {
+		Owner owner = this.owners.findById(6).orElseThrow();
+		Visit visit = new Visit();
+		visit.setDescription(" ");
+		owner.addVisit(7, visit);
+
+		assertThatExceptionOfType(ConstraintViolationException.class).isThrownBy(() -> {
+			this.owners.save(owner);
+			this.entityManager.flush();
+		});
+	}
+
+	@Test
+	@Transactional
+	void shouldRejectPetWithoutType() {
+		Owner owner = this.owners.findById(6).orElseThrow();
+		Pet pet = new Pet();
+		pet.setName("Typeless");
+		owner.addPet(pet);
+
+		assertThatExceptionOfType(DataIntegrityViolationException.class).isThrownBy(() -> {
+			this.owners.save(owner);
+			this.entityManager.flush();
+		});
+	}
+
+	@Test
+	@Transactional
+	void shouldRejectVisitForPetOfAnotherOwner() {
+		Owner owner = this.owners.findById(6).orElseThrow();
+
+		assertThatIllegalArgumentException().isThrownBy(() -> owner.addVisit(1, new Visit()))
+			.withMessage("Invalid Pet identifier!");
+	}
+
+	private static Owner newOwner() {
+		Owner owner = new Owner();
+		owner.setFirstName("Sam");
+		owner.setLastName("Schultz");
+		owner.setAddress("4, Evans Street");
+		owner.setCity("Wollongong");
+		owner.setTelephone("4444444444");
+		return owner;
 	}
 
 }
