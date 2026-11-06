@@ -16,6 +16,8 @@
 
 package org.springframework.samples.petclinic.owner;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -112,6 +114,32 @@ public class PetValidatorTests {
 			assertTrue(errors.hasFieldErrors("birthDate"));
 		}
 
+	}
+
+	@Test
+	void testValidateExistingPetWithoutType() {
+		pet.setId(1);
+		pet.setName(petName);
+		pet.setBirthDate(petBirthDate);
+
+		petValidator.validate(pet, errors);
+
+		assertThat(errors.hasErrors()).isFalse();
+	}
+
+	@Test
+	void testValidateReportsRequiredErrorCodes() {
+		petValidator.validate(pet, errors);
+
+		assertThat(errors.getFieldError("name").getCode()).isEqualTo("required");
+		assertThat(errors.getFieldError("type").getCode()).isEqualTo("required");
+		assertThat(errors.getFieldError("birthDate").getCode()).isEqualTo("required");
+	}
+
+	@Test
+	void testSupports() {
+		assertThat(petValidator.supports(Pet.class)).isTrue();
+		assertThat(petValidator.supports(Owner.class)).isFalse();
 	}
 
 }

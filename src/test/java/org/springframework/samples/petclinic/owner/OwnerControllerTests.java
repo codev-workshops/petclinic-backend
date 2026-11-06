@@ -16,6 +16,13 @@
 
 package org.springframework.samples.petclinic.owner;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageRequest;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledInNativeImage;
@@ -246,6 +253,88 @@ class OwnerControllerTests {
 			.andExpect(status().is3xxRedirection())
 			.andExpect(redirectedUrl("/owners/" + pathOwnerId + "/edit"))
 			.andExpect(flash().attributeExists("error"));
+	}
+
+	@Test
+	void testProcessCreationFormPersistsOwnerAndIgnoresPostedId() throws Exception {
+		mockMvc
+			.perform(post("/owners/new").param("id", "1")
+				.param("firstName", "Joe")
+				.param("lastName", "Bloggs")
+				.param("address", "123 Caramel Street")
+				.param("city", "London")
+				.param("telephone", "1316761638"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "New Owner Created"));
+
+		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+		verify(this.owners).save(saved.capture());
+		assertThat(saved.getValue().getId()).isNull();
+		assertThat(saved.getValue().getLastName()).isEqualTo("Bloggs");
+		assertThat(saved.getValue().getTelephone()).isEqualTo("1316761638");
+	}
+
+	@Test
+	void testProcessCreationFormRejectsInvalidTelephone() throws Exception {
+		mockMvc
+			.perform(post("/owners/new").param("firstName", "Joe")
+				.param("lastName", "Bloggs")
+				.param("address", "123 Caramel Street")
+				.param("city", "London")
+				.param("telephone", "12345"))
+			.andExpect(status().isOk())
+			.andExpect(model().attributeHasFieldErrors("owner", "telephone"))
+			.andExpect(view().name("owners/createOrUpdateOwnerForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void testProcessUpdateOwnerFormPersistsChanges() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/edit", TEST_OWNER_ID).param("firstName", "Joe")
+				.param("lastName", "Bloggs")
+				.param("address", "123 Caramel Street")
+				.param("city", "London")
+				.param("telephone", "1616291589"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "Owner Values Updated"));
+
+		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+		verify(this.owners).save(saved.capture());
+		assertThat(saved.getValue().getId()).isEqualTo(TEST_OWNER_ID);
+		assertThat(saved.getValue().getCity()).isEqualTo("London");
+	}
+
+	@Test
+	void testProcessFindFormSecondPage() throws Exception {
+		List<Owner> secondPage = List.of(george(), new Owner());
+		given(this.owners.findByLastNameStartingWith("", PageRequest.of(1, 5)))
+			.willReturn(new PageImpl<>(secondPage, PageRequest.of(1, 5), 7));
+
+		mockMvc.perform(get("/owners?page=2"))
+			.andExpect(status().isOk())
+			.andExpect(model().attribute("currentPage", 2))
+			.andExpect(model().attribute("totalPages", 2))
+			.andExpect(model().attribute("totalItems", 7L))
+			.andExpect(model().attribute("listOwners", hasSize(2)))
+			.andExpect(view().name("owners/ownersList"));
+	}
+
+	@Test
+	void testShowOwnerWithUnknownId() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}", 99)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageContaining("Owner not found with id: 99");
+	}
+
+	@Test
+	void testInitUpdateOwnerFormWithUnknownId() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/edit", 99)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageContaining("Owner not found with id: 99");
 	}
 
 }

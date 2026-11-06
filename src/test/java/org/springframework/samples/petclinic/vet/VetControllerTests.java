@@ -16,6 +16,9 @@
 
 package org.springframework.samples.petclinic.vet;
 
+import static org.hamcrest.Matchers.hasSize;
+import org.springframework.data.domain.PageRequest;
+
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,6 +98,20 @@ class VetControllerTests {
 			.andExpect(status().isOk());
 		actions.andExpect(content().contentType(MediaType.APPLICATION_JSON))
 			.andExpect(jsonPath("$.vetList[0].id").value(1));
+	}
+
+	@Test
+	void testShowVetListSecondPage() throws Exception {
+		given(this.vets.findAll(PageRequest.of(1, 5)))
+			.willReturn(new PageImpl<>(Lists.newArrayList(helen()), PageRequest.of(1, 5), 6));
+
+		mockMvc.perform(get("/vets.html?page=2"))
+			.andExpect(status().isOk())
+			.andExpect(model().attribute("currentPage", 2))
+			.andExpect(model().attribute("totalPages", 2))
+			.andExpect(model().attribute("totalItems", 6L))
+			.andExpect(model().attribute("listVets", hasSize(1)))
+			.andExpect(view().name("vets/vetList"));
 	}
 
 }
