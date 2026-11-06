@@ -16,6 +16,8 @@
 
 package org.springframework.samples.petclinic.service;
 
+import org.springframework.data.domain.PageRequest;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
@@ -246,6 +248,37 @@ class ClinicServiceTests {
 			.element(0)
 			.extracting(Visit::getDate)
 			.isNotNull();
+	}
+
+	@Test
+	void shouldPageOwnersByLastName() {
+		Page<Owner> secondPage = this.owners.findByLastNameStartingWith("", PageRequest.of(1, 5));
+
+		assertThat(secondPage.getTotalElements()).isEqualTo(10);
+		assertThat(secondPage.getTotalPages()).isEqualTo(2);
+		assertThat(secondPage.getContent()).hasSize(5);
+	}
+
+	@Test
+	void shouldPageVets() {
+		Page<Vet> firstPage = this.vets.findAll(PageRequest.of(0, 5));
+		Page<Vet> secondPage = this.vets.findAll(PageRequest.of(1, 5));
+
+		assertThat(firstPage.getTotalElements()).isEqualTo(6);
+		assertThat(firstPage.getContent()).hasSize(5);
+		assertThat(secondPage.getContent()).hasSize(1);
+	}
+
+	@Test
+	void shouldReturnPetTypesSortedByName() {
+		assertThat(this.types.findPetTypes()).extracting(PetType::getName).isSorted();
+	}
+
+	@Test
+	void shouldFindPetByNameIgnoringCase() {
+		Owner owner6 = this.owners.findById(6).orElseThrow();
+
+		assertThat(owner6.getPet("SAMANTHA")).isNotNull();
 	}
 
 }

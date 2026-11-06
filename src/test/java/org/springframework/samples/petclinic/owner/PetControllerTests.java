@@ -16,6 +16,14 @@
 
 package org.springframework.samples.petclinic.owner;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
+import org.mockito.ArgumentCaptor;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -206,6 +214,126 @@ class PetControllerTests {
 				.andExpect(view().name("pets/createOrUpdatePetForm"));
 		}
 
+	}
+
+	@Test
+	void testProcessCreationFormPersistsNewPet() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Betty")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "New Pet has been Added"));
+
+		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+		verify(this.owners).save(saved.capture());
+		Pet betty = saved.getValue().getPet("Betty");
+		assertThat(betty).isNotNull();
+		assertThat(betty.getType().getName()).isEqualTo("hamster");
+		assertThat(betty.getBirthDate()).isEqualTo(LocalDate.of(2015, 2, 12));
+	}
+
+	@Test
+	void testProcessCreationFormWithTodayBirthDateSucceeds() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Betty")
+				.param("type", "hamster")
+				.param("birthDate", LocalDate.now().toString()))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(view().name("redirect:/owners/{ownerId}"));
+	}
+
+	@Test
+	void testProcessCreationFormDoesNotSaveOnErrors() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "petty")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "name", "duplicate"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void testProcessUpdateFormPersistsEditedPet() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "Betty")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "Pet details has been edited"));
+
+		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+		verify(this.owners).save(saved.capture());
+		Pet edited = saved.getValue().getPet(TEST_PET_ID);
+		assertThat(edited.getName()).isEqualTo("Betty");
+		assertThat(edited.getType().getName()).isEqualTo("hamster");
+		assertThat(edited.getBirthDate()).isEqualTo(LocalDate.of(2015, 2, 12));
+		assertThat(saved.getValue().getPets()).hasSize(2);
+	}
+
+	@Test
+	void testProcessUpdateFormKeepsOwnNameInDifferentCase() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "PETTY")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(view().name("redirect:/owners/{ownerId}"));
+	}
+
+	@Test
+	void testProcessUpdateFormWithDuplicateName() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "doggy")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "name", "duplicate"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("pets/createOrUpdatePetForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void testProcessUpdateFormWithNameOfEarlierPet() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID + 1).param("name", "Petty")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "name", "duplicate"))
+			.andExpect(view().name("pets/createOrUpdatePetForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void testProcessUpdateFormWithFutureBirthDate() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "Betty")
+				.param("type", "hamster")
+				.param("birthDate", LocalDate.now().plusDays(1).toString()))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "birthDate", "typeMismatch.birthDate"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("pets/createOrUpdatePetForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void testInitCreationFormWithUnknownOwner() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/pets/new", 99)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageContaining("Owner not found with id: 99");
+	}
+
+	@Test
+	void testInitUpdateFormWithUnknownOwner() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/pets/{petId}/edit", 99, TEST_PET_ID)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageContaining("Owner not found with id: 99");
 	}
 
 }

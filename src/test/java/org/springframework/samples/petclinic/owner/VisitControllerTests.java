@@ -16,6 +16,14 @@
 
 package org.springframework.samples.petclinic.owner;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
+import org.mockito.ArgumentCaptor;
+
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -89,6 +97,47 @@ class VisitControllerTests {
 			.andExpect(model().attributeHasErrors("visit"))
 			.andExpect(status().isOk())
 			.andExpect(view().name("pets/createOrUpdateVisitForm"));
+	}
+
+	@Test
+	void testProcessNewVisitFormPersistsVisit() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, TEST_PET_ID)
+				.param("date", "2024-01-15")
+				.param("description", "Annual checkup"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "Your visit has been booked"));
+
+		ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+		verify(this.owners).save(saved.capture());
+		assertThat(saved.getValue().getPet(TEST_PET_ID).getVisits()).anySatisfy(visit -> {
+			assertThat(visit.getDescription()).isEqualTo("Annual checkup");
+			assertThat(visit.getDate()).isEqualTo(java.time.LocalDate.of(2024, 1, 15));
+		});
+	}
+
+	@Test
+	void testProcessNewVisitFormDoesNotSaveOnErrors() throws Exception {
+		mockMvc.perform(post("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, TEST_PET_ID))
+			.andExpect(model().attributeHasFieldErrors("visit", "description"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void testInitNewVisitFormWithUnknownOwner() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/pets/{petId}/visits/new", 99, TEST_PET_ID)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessageContaining("Owner not found with id: 99");
+	}
+
+	@Test
+	void testInitNewVisitFormWithUnknownPet() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/pets/{petId}/visits/new", TEST_OWNER_ID, 99)))
+			.hasRootCauseInstanceOf(IllegalArgumentException.class)
+			.rootCause()
+			.hasMessage("Pet with id 99 not found for owner with id 1.");
 	}
 
 }

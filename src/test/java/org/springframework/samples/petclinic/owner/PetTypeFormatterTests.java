@@ -94,4 +94,9 @@ class PetTypeFormatterTests {
 		return petTypes;
 	}
 
+	@Test
+	void testPrintWithoutName() {
+		assertThat(this.petTypeFormatter.print(new PetType(), Locale.ENGLISH)).isEqualTo("<null>");
+	}
+
 }
