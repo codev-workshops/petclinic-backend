@@ -158,7 +158,7 @@ class PetController {
 	}
 
 	/**
-	 * Updates the pet details if it exists or adds a new pet to the owner.
+	 * Updates the pet details if it exists.
 	 * @param owner The owner of the pet
 	 * @param pet The pet with updated details
 	 */
@@ -171,9 +171,6 @@ class PetController {
 			existingPet.setName(pet.getName());
 			existingPet.setBirthDate(pet.getBirthDate());
 			existingPet.setType(pet.getType());
-		}
-		else {
-			owner.addPet(pet);
 		}
 		this.owners.save(owner);
 	}
